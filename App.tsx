@@ -182,6 +182,14 @@ const App: React.FC = () => {
     return '';
   });
   const [showApiKey, setShowApiKey] = useState(false);
+  const [showApiKeyPromptModal, setShowApiKeyPromptModal] = useState<boolean>(() => {
+    try {
+      return !localStorage.getItem('ai_studio_api_key');
+    } catch (e) {
+      console.warn("Failed to check API key in localStorage", e);
+    }
+    return true;
+  });
   
   // Realtime Edit State
   const [isRealtimeEditMode, setIsRealtimeEditMode] = useState(false);
@@ -806,6 +814,95 @@ const App: React.FC = () => {
       
       {isMobileMenuOpen && (
         <div className="fixed inset-0 bg-black/50 z-40 md:hidden backdrop-blur-sm transition-opacity" onClick={() => setIsMobileMenuOpen(false)} />
+      )}
+
+      {/* Gemini API Key Required Overlay Modal */}
+      {showApiKeyPromptModal && (
+        <div className="fixed inset-0 bg-gray-900/80 z-[300] flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in duration-300" id="api-key-required-modal">
+          <div className="bg-white w-full max-w-md rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 border border-blue-50/50 flex flex-col">
+            <div className="p-8 bg-gradient-to-b from-blue-50/80 to-white border-b border-gray-100 flex flex-col items-center text-center">
+              <div className="bg-blue-600 text-white p-4 rounded-2xl shadow-lg shadow-blue-500/30 mb-4 animate-in duration-500 zoom-in-50">
+                <Key size={32} />
+              </div>
+              <h3 className="text-xl font-extrabold text-gray-900 tracking-tight leading-tight">Gemini API Key Diperlukan</h3>
+              <p className="text-[11px] text-gray-500 mt-2 leading-relaxed">
+                Platform ini dihoskan sebagai aplikasi web statik. Sila masukkan **Gemini API Key** anda sendiri pada permulaan untuk mula menjana aplikasi dengan lancar.
+              </p>
+              <p className="text-[9px] text-gray-400 mt-1 font-medium">
+                Your key is stored 100% locally in your browser's LocalStorage and is never shared.
+              </p>
+            </div>
+            
+            <div className="p-8 space-y-5">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between px-1">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">
+                    Sila Masukkan Gemini API Key
+                  </label>
+                  <a 
+                    href="https://aistudio.google.com/" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:underline flex items-center gap-1 transition-colors"
+                  >
+                    Dapatkan Kunci di Google AI Studio <ArrowRight size={10} />
+                  </a>
+                </div>
+                
+                <div className="relative">
+                  <input 
+                    type={showApiKey ? "text" : "password"}
+                    value={customApiKey}
+                    onChange={(e) => setCustomApiKey(e.target.value)}
+                    placeholder="Enter AI Studio GEMINI_API_KEY..."
+                    className="w-full pr-12 pl-4 py-3.5 bg-gray-50 border-2 border-gray-100 rounded-2xl text-xs font-mono font-medium focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all placeholder:text-gray-400"
+                  />
+                  <button 
+                    type="button"
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-all"
+                  >
+                    {showApiKey ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+
+              {customApiKey.trim() ? (
+                <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100 flex items-center gap-2.5 animate-in slide-in-from-top-1 duration-150">
+                  <Check size={14} className="text-emerald-600 shrink-0" />
+                  <p className="text-[10px] text-emerald-800 font-bold">Kunci sedia untuk disimpan di pelayar web anda.</p>
+                </div>
+              ) : (
+                <div className="p-3 bg-amber-50 rounded-xl border border-amber-100 flex items-start gap-2.5">
+                  <ZapOff size={14} className="text-amber-600 mt-0.5 shrink-0" />
+                  <p className="text-[10px] text-amber-800/90 font-medium leading-relaxed">
+                    Menjana binaan memerlukan kunci API yang beroperasi guna model Google Gemini.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="px-8 pb-8 pt-1">
+              <button 
+                type="button"
+                onClick={() => {
+                  if (customApiKey.trim()) {
+                    try {
+                      localStorage.setItem('ai_studio_api_key', customApiKey.trim());
+                    } catch (e) {
+                      console.warn("Failed to write API key to localStorage", e);
+                    }
+                    setShowApiKeyPromptModal(false);
+                  }
+                }}
+                disabled={!customApiKey.trim()}
+                className="w-full py-4 bg-gray-900 hover:bg-black disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed text-white rounded-2xl text-sm font-extrabold shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+              >
+                Simpan & Teruskan <Check size={16} />
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Realtime Edit Popup Modal */}
