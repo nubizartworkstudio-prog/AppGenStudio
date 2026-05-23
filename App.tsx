@@ -115,14 +115,14 @@ const App: React.FC = () => {
     return '';
   })();
 
-  const [projectTitle, setProjectTitle] = useState(initialProjectTitle);
-  const [prompt, setPrompt] = useState(initialActiveProject ? initialActiveProject.prompt : '');
+  const [projectTitle, setProjectTitle] = useState('');
+  const [prompt, setPrompt] = useState('');
   const [refinePrompt, setRefinePrompt] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
-  const [code, setCode] = useState(initialActiveProject ? initialActiveProject.code : '');
-  const [editableCode, setEditableCode] = useState(initialActiveProject ? initialActiveProject.code : '');
+  const [code, setCode] = useState('');
+  const [editableCode, setEditableCode] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>(initialActiveProject ? 'preview' : 'build');
+  const [viewMode, setViewMode] = useState<ViewMode>('build');
   const [device, setDevice] = useState<PreviewDevice>(PreviewDevice.DESKTOP);
   const [orientation, setOrientation] = useState<Orientation>('portrait');
   const [history, setHistory] = useState<GeneratedProject[]>(initialHistory);
@@ -132,7 +132,7 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [quotaExhausted, setQuotaExhausted] = useState(false);
   const [showRefineSidebar, setShowRefineSidebar] = useState(false);
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(initialActiveProjectId);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string>(() => {
