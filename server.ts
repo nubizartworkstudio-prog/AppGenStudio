@@ -13,17 +13,17 @@ async function startServer() {
   // API Route - Proxies Gemini API calls safely on the server-side
   app.post("/api/generate", async (req, res) => {
     try {
-      const { prompt, model, existingCode, file } = req.body;
+      const { prompt, model, existingCode, file, customApiKey } = req.body;
 
       if (!prompt) {
         return res.status(400).json({ error: "Prompt is required" });
       }
 
-      // Obtain API Key from secure server-side process environment variables
-      const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+      // Obtain API Key from client or server environment
+      const apiKey = customApiKey || process.env.GEMINI_API_KEY || process.env.API_KEY;
       if (!apiKey) {
         return res.status(400).json({ 
-          error: "No Gemini API key is configured. Please provide your Gemini API Key in the settings panel." 
+          error: "No Gemini API key is configured. Please provide your Gemini API Key in the Studio Settings panel." 
         });
       }
 

@@ -50,7 +50,10 @@ import {
   Download,
   Keyboard,
   History,
-  Clipboard
+  Clipboard,
+  Eye,
+  EyeOff,
+  Key
 } from 'lucide-react';
 import { PreviewDevice, GeneratedProject, ViewMode, Orientation } from './types';
 import { generateAppCode } from './services/geminiService';
@@ -169,6 +172,16 @@ const App: React.FC = () => {
     return true;
   });
   const [lastAutosave, setLastAutosave] = useState<number | null>(null);
+
+  const [customApiKey, setCustomApiKey] = useState<string>(() => {
+    try {
+      return localStorage.getItem('ai_studio_api_key') || '';
+    } catch (e) {
+      console.warn("Failed to get API key from localStorage", e);
+    }
+    return '';
+  });
+  const [showApiKey, setShowApiKey] = useState(false);
   
   // Realtime Edit State
   const [isRealtimeEditMode, setIsRealtimeEditMode] = useState(false);
@@ -248,6 +261,18 @@ const App: React.FC = () => {
       console.warn("Failed to write autosave flag to localStorage", e);
     }
   }, [isAutosaveEnabled]);
+
+  useEffect(() => {
+    try {
+      if (customApiKey) {
+        localStorage.setItem('ai_studio_api_key', customApiKey);
+      } else {
+        localStorage.removeItem('ai_studio_api_key');
+      }
+    } catch (e) {
+      console.warn("Failed to write API key to localStorage", e);
+    }
+  }, [customApiKey]);
 
   // Autosave logic
   useEffect(() => {
@@ -1075,6 +1100,44 @@ const App: React.FC = () => {
                       <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${isAutosaveEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
                     </div>
                   </label>
+                </div>
+              </section>
+
+              <section>
+                <div className="flex items-center gap-2 mb-4">
+                  <Key size={16} className="text-blue-600" />
+                  <h3 className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-gray-400">API Credentials</h3>
+                </div>
+                <div className="space-y-4">
+                  <div className="p-4 rounded-2xl border-2 border-gray-100 bg-white flex flex-col gap-2 transition-all">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-gray-700">Gemini API Key</p>
+                        <p className="text-[10px] text-gray-400 mt-0.5 font-medium">Use your personal Gemini API Key instead of the default shared quota</p>
+                      </div>
+                    </div>
+                    <div className="relative mt-2">
+                      <input 
+                        type={showApiKey ? "text" : "password"}
+                        value={customApiKey}
+                        onChange={(e) => setCustomApiKey(e.target.value)}
+                        placeholder="Enter your GEMINI_API_KEY..."
+                        className="w-full pr-10 pl-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-mono font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-gray-400"
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => setShowApiKey(!showApiKey)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                      >
+                        {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                    {customApiKey && (
+                      <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1 mt-1 animate-in slide-in-from-top-1 duration-150">
+                        <Check size={12} /> Custom API Key loaded successfully.
+                      </p>
+                    )}
+                  </div>
                 </div>
               </section>
 

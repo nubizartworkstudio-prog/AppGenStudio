@@ -15,6 +15,7 @@ export async function generateAppCode(
   file?: FileBlob
 ): Promise<GenerationResult> {
   try {
+    const customApiKey = localStorage.getItem('ai_studio_api_key') || '';
     const response = await fetch('/api/generate', {
       method: 'POST',
       headers: {
@@ -24,7 +25,8 @@ export async function generateAppCode(
         prompt,
         model,
         existingCode,
-        file
+        file,
+        customApiKey
       }),
       signal
     });
