@@ -49,7 +49,11 @@ import {
   Code,
   Download,
   Keyboard,
-  History
+  History,
+  Clipboard,
+  Eye,
+  EyeOff,
+  Key
 } from 'lucide-react';
 import { PreviewDevice, GeneratedProject, ViewMode, Orientation } from './types';
 import { generateAppCode } from './services/geminiService';
@@ -69,6 +73,51 @@ interface EditElementData {
 }
 
 const App: React.FC = () => {
+  // Synchronously load the history and active project on mount to initialize the states consistently
+  const initialHistory = (() => {
+    try {
+      const saved = localStorage.getItem('ai_studio_history_v2');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed as GeneratedProject[];
+        }
+      }
+    } catch (e) {
+      console.error("Failed to parse history from localStorage", e);
+    }
+    return [] as GeneratedProject[];
+  })();
+
+  const initialActiveProjectId = (() => {
+    try {
+      const savedActiveId = localStorage.getItem('ai_studio_active_project_id');
+      if (initialHistory && initialHistory.length > 0) {
+        if (savedActiveId && initialHistory.some(p => p && p.id === savedActiveId)) {
+          return savedActiveId;
+        }
+        return initialHistory[0].id; // Default to latest project in history
+      }
+    } catch (e) {
+      console.error("Failed to parse active project ID from localStorage", e);
+    }
+    return null;
+  })();
+
+  const initialActiveProject = Array.isArray(initialHistory) 
+    ? initialHistory.find(p => p && p.id === initialActiveProjectId) 
+    : undefined;
+
+  const initialProjectTitle = (() => {
+    if (initialActiveProject) {
+      const rootProj = initialActiveProject.parentId 
+        ? initialHistory.find(p => p && p.id === initialActiveProject.parentId) || initialActiveProject
+        : initialActiveProject;
+      return rootProj.name || '';
+    }
+    return '';
+  })();
+
   const [projectTitle, setProjectTitle] = useState('');
   const [prompt, setPrompt] = useState('');
   const [refinePrompt, setRefinePrompt] = useState('');
@@ -79,7 +128,7 @@ const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('build');
   const [device, setDevice] = useState<PreviewDevice>(PreviewDevice.DESKTOP);
   const [orientation, setOrientation] = useState<Orientation>('portrait');
-  const [history, setHistory] = useState<GeneratedProject[]>([]);
+  const [history, setHistory] = useState<GeneratedProject[]>(initialHistory);
   const [copied, setCopied] = useState(false);
   const [applySuccess, setApplySuccess] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -89,20 +138,60 @@ const App: React.FC = () => {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState('gemini-3.5-flash');
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    try {
+      const savedModel = localStorage.getItem('ai_studio_selected_model');
+      if (savedModel) {
+        if (savedModel.startsWith('gpt') || savedModel.includes('2.5') || savedModel.includes('3.1-flash-lite-preview')) {
+          return 'gemini-3.5-flash';
+        }
+        return savedModel;
+      }
+    } catch (e) {
+      console.warn("Failed to get selected model from localStorage", e);
+    }
+    return 'gemini-3.5-flash';
+  });
   const [previewKey, setPreviewKey] = useState(0);
-  const [submitKeyShortcut, setSubmitKeyShortcut] = useState<'ctrl-enter' | 'enter'>('ctrl-enter');
-  const [isAutosaveEnabled, setIsAutosaveEnabled] = useState(true);
+  const [submitKeyShortcut, setSubmitKeyShortcut] = useState<'ctrl-enter' | 'enter'>(() => {
+    try {
+      const savedShortcut = localStorage.getItem('ai_studio_submit_shortcut');
+      return (savedShortcut === 'ctrl-enter' || savedShortcut === 'enter') ? savedShortcut : 'ctrl-enter';
+    } catch (e) {
+      console.warn("Failed to get submit shortcut from localStorage", e);
+    }
+    return 'ctrl-enter';
+  });
+  const [isAutosaveEnabled, setIsAutosaveEnabled] = useState<boolean>(() => {
+    try {
+      const savedAutosave = localStorage.getItem('ai_studio_autosave_enabled');
+      return savedAutosave !== null ? savedAutosave === 'true' : true;
+    } catch (e) {
+      console.warn("Failed to get autosave flag from localStorage", e);
+    }
+    return true;
+  });
   const [lastAutosave, setLastAutosave] = useState<number | null>(null);
+
+  const [customApiKey, setCustomApiKey] = useState<string>(() => {
+    try {
+      return localStorage.getItem('ai_studio_api_key') || '';
+    } catch (e) {
+      console.warn("Failed to get API key from localStorage", e);
+    }
+    return '';
+  });
+  const [showApiKey, setShowApiKey] = useState(false);
   
   // Realtime Edit State
   const [isRealtimeEditMode, setIsRealtimeEditMode] = useState(false);
   const [activeEditElement, setActiveEditElement] = useState<EditElementData | null>(null);
-
+  
   // Generic File Upload State
   const [selectedFile, setSelectedFile] = useState<{ data: string, mimeType: string, name: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const refineFileInputRef = useRef<HTMLInputElement>(null);
+  const codeTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Renaming state
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
@@ -122,39 +211,6 @@ const App: React.FC = () => {
   const previewContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Load History
-    const savedHistory = localStorage.getItem('ai_studio_history_v2');
-    if (savedHistory) {
-      try {
-        const parsed = JSON.parse(savedHistory);
-        setHistory(parsed);
-      } catch (e) {
-        console.error("Failed to parse history");
-      }
-    }
-
-    // Load Model
-    const savedModel = localStorage.getItem('ai_studio_selected_model');
-    if (savedModel) {
-      if (savedModel.startsWith('gpt') || savedModel.includes('2.5') || savedModel.includes('3.1-flash-lite-preview')) {
-        setSelectedModel('gemini-3.5-flash');
-      } else {
-        setSelectedModel(savedModel);
-      }
-    }
-
-    // Load Submit Shortcut
-    const savedShortcut = localStorage.getItem('ai_studio_submit_shortcut');
-    if (savedShortcut === 'ctrl-enter' || savedShortcut === 'enter') {
-      setSubmitKeyShortcut(savedShortcut);
-    }
-
-    // Load Autosave Preference
-    const savedAutosave = localStorage.getItem('ai_studio_autosave_enabled');
-    if (savedAutosave !== null) {
-      setIsAutosaveEnabled(savedAutosave === 'true');
-    }
-
     return () => {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
@@ -163,20 +219,60 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('ai_studio_history_v2', JSON.stringify(history));
+    try {
+      localStorage.setItem('ai_studio_history_v2', JSON.stringify(history));
+    } catch (e) {
+      console.warn("Failed to write history to localStorage", e);
+    }
   }, [history]);
 
   useEffect(() => {
-    localStorage.setItem('ai_studio_selected_model', selectedModel);
+    try {
+      if (activeProjectId) {
+        localStorage.setItem('ai_studio_active_project_id', activeProjectId);
+      } else {
+        localStorage.removeItem('ai_studio_active_project_id');
+      }
+    } catch (e) {
+      console.warn("Failed to write active project ID to localStorage", e);
+    }
+  }, [activeProjectId]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ai_studio_selected_model', selectedModel);
+    } catch (e) {
+      console.warn("Failed to write selected model to localStorage", e);
+    }
   }, [selectedModel]);
 
   useEffect(() => {
-    localStorage.setItem('ai_studio_submit_shortcut', submitKeyShortcut);
+    try {
+      localStorage.setItem('ai_studio_submit_shortcut', submitKeyShortcut);
+    } catch (e) {
+      console.warn("Failed to write submit shortcut to localStorage", e);
+    }
   }, [submitKeyShortcut]);
 
   useEffect(() => {
-    localStorage.setItem('ai_studio_autosave_enabled', isAutosaveEnabled.toString());
+    try {
+      localStorage.setItem('ai_studio_autosave_enabled', isAutosaveEnabled.toString());
+    } catch (e) {
+      console.warn("Failed to write autosave flag to localStorage", e);
+    }
   }, [isAutosaveEnabled]);
+
+  useEffect(() => {
+    try {
+      if (customApiKey) {
+        localStorage.setItem('ai_studio_api_key', customApiKey);
+      } else {
+        localStorage.removeItem('ai_studio_api_key');
+      }
+    } catch (e) {
+      console.warn("Failed to write API key to localStorage", e);
+    }
+  }, [customApiKey]);
 
   // Autosave logic
   useEffect(() => {
@@ -271,7 +367,15 @@ const App: React.FC = () => {
     setPrompt("");
     setCode(blankBoilerplate);
     setEditableCode(blankBoilerplate);
-    setHistory(prev => [newProject, ...prev]);
+    setHistory(prev => {
+      const next = [newProject, ...prev];
+      try {
+        localStorage.setItem('ai_studio_history_v2', JSON.stringify(next));
+      } catch (e) {
+        console.warn("Failed to save history in handleCreateBlankProject", e);
+      }
+      return next;
+    });
     setActiveProjectId(newProjectId);
     setViewMode('preview');
     setIsMobileMenuOpen(false);
@@ -279,7 +383,7 @@ const App: React.FC = () => {
   };
 
   const saveToSimulatedFS = (title: string, appCode: string, appPrompt: string) => {
-    const basePath = `Web Studio/${title.trim()}`;
+    const basePath = `App Gen Studio/${title.trim()}`;
     localStorage.setItem(`${basePath}/index.html`, appCode);
     localStorage.setItem(`${basePath}/metadata.json`, JSON.stringify({
       name: title.trim(),
@@ -302,7 +406,15 @@ const App: React.FC = () => {
 
   const handleConfirmOverwrite = () => {
     if (!overwriteCandidate) return;
-    setHistory(prev => prev.map(p => p.id === overwriteCandidate.id ? { ...p, code, prompt, timestamp: Date.now() } : p));
+    setHistory(prev => {
+      const next = prev.map(p => p.id === overwriteCandidate.id ? { ...p, code, prompt, timestamp: Date.now() } : p);
+      try {
+        localStorage.setItem('ai_studio_history_v2', JSON.stringify(next));
+      } catch (e) {
+        console.warn("Failed to save history in handleConfirmOverwrite", e);
+      }
+      return next;
+    });
     setActiveProjectId(overwriteCandidate.id);
     saveToSimulatedFS(projectTitle, code, prompt);
     triggerFileDownload(projectTitle, code);
@@ -317,7 +429,15 @@ const App: React.FC = () => {
     if (existingProject && existingProject.id !== activeProjectId) {
       setOverwriteCandidate(existingProject);
     } else if (activeProjectId) {
-      setHistory(prev => prev.map(p => p.id === activeProjectId ? { ...p, name: projectTitle.trim(), code, prompt, timestamp: Date.now() } : p));
+      setHistory(prev => {
+        const next = prev.map(p => p.id === activeProjectId ? { ...p, name: projectTitle.trim(), code, prompt, timestamp: Date.now() } : p);
+        try {
+          localStorage.setItem('ai_studio_history_v2', JSON.stringify(next));
+        } catch (e) {
+          console.warn("Failed to save history in handleSaveProject update", e);
+        }
+        return next;
+      });
       saveToSimulatedFS(projectTitle, code, prompt);
       triggerFileDownload(projectTitle, code);
       setSaveSuccess(true);
@@ -331,7 +451,15 @@ const App: React.FC = () => {
         code: code,
         timestamp: Date.now()
       };
-      setHistory(prev => [newProject, ...prev]);
+      setHistory(prev => {
+        const next = [newProject, ...prev];
+        try {
+          localStorage.setItem('ai_studio_history_v2', JSON.stringify(next));
+        } catch (e) {
+          console.warn("Failed to save history in handleSaveProject new", e);
+        }
+        return next;
+      });
       setActiveProjectId(newProjectId);
       saveToSimulatedFS(projectTitle, code, prompt);
       triggerFileDownload(projectTitle, code);
@@ -384,7 +512,15 @@ const App: React.FC = () => {
       
       setCode(result.code);
       setEditableCode(result.code);
-      setHistory(prev => [newProject, ...prev]);
+      setHistory(prev => {
+        const next = [newProject, ...prev];
+        try {
+          localStorage.setItem('ai_studio_history_v2', JSON.stringify(next));
+        } catch (e) {
+          console.warn("Failed to save history in handleGenerate", e);
+        }
+        return next;
+      });
       setActiveProjectId(newProjectId);
       
       if (isRefinement) {
@@ -423,7 +559,15 @@ const App: React.FC = () => {
       setEditingProjectId(null);
       return;
     }
-    setHistory(prev => prev.map(p => p.id === id ? { ...p, name: newName } : p));
+    setHistory(prev => {
+      const next = prev.map(p => p.id === id ? { ...p, name: newName } : p);
+      try {
+        localStorage.setItem('ai_studio_history_v2', JSON.stringify(next));
+      } catch (e) {
+        console.warn("Failed to save history in handleRename", e);
+      }
+      return next;
+    });
     if (activeProjectId === id) setProjectTitle(newName);
     setEditingProjectId(null);
   };
@@ -437,7 +581,15 @@ const App: React.FC = () => {
   const confirmDelete = () => {
     if (!projectToDeleteId) return;
     const id = projectToDeleteId;
-    setHistory(prev => prev.filter(p => p.id !== id && p.parentId !== id));
+    setHistory(prev => {
+      const next = prev.filter(p => p.id !== id && p.parentId !== id);
+      try {
+        localStorage.setItem('ai_studio_history_v2', JSON.stringify(next));
+      } catch (e) {
+        console.warn("Failed to save history in confirmDelete", e);
+      }
+      return next;
+    });
     if (activeProjectId === id) {
       setActiveProjectId(null);
       setCode('');
@@ -454,11 +606,54 @@ const App: React.FC = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleClearCode = () => {
+    setEditableCode('');
+  };
+
+  const handlePasteCode = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text) return;
+      const textarea = codeTextareaRef.current;
+      if (textarea) {
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const currentVal = textarea.value;
+        const newVal = currentVal.substring(0, start) + text + currentVal.substring(end);
+        setEditableCode(newVal);
+        setTimeout(() => {
+          textarea.focus();
+          textarea.setSelectionRange(start + text.length, start + text.length);
+        }, 0);
+      } else {
+        setEditableCode(text);
+      }
+    } catch (err) {
+      console.warn("Failed to read clipboard:", err);
+    }
+  };
+
+  const handleSelectAllCode = () => {
+    const textarea = codeTextareaRef.current;
+    if (textarea) {
+      textarea.focus();
+      textarea.select();
+    }
+  };
+
   const applyManualChanges = () => {
     setCode(editableCode);
     setPreviewKey(k => k + 1);
     if (activeProjectId) {
-      setHistory(prev => prev.map(p => p.id === activeProjectId ? { ...p, code: editableCode } : p));
+      setHistory(prev => {
+        const next = prev.map(p => p.id === activeProjectId ? { ...p, code: editableCode } : p);
+        try {
+          localStorage.setItem('ai_studio_history_v2', JSON.stringify(next));
+        } catch (e) {
+          console.warn("Failed to save history in applyManualChanges", e);
+        }
+        return next;
+      });
     }
     setApplySuccess(true);
     setTimeout(() => setApplySuccess(false), 2000);
@@ -585,7 +780,15 @@ const App: React.FC = () => {
       setCode(updatedHTML);
       setEditableCode(updatedHTML);
       if (activeProjectId) {
-        setHistory(prev => prev.map(p => p.id === activeProjectId ? { ...p, code: updatedHTML } : p));
+        setHistory(prev => {
+          const next = prev.map(p => p.id === activeProjectId ? { ...p, code: updatedHTML } : p);
+          try {
+            localStorage.setItem('ai_studio_history_v2', JSON.stringify(next));
+          } catch (e) {
+            console.warn("Failed to save history in handleSaveElementChanges", e);
+          }
+          return next;
+        });
       }
     }
 
@@ -900,6 +1103,44 @@ const App: React.FC = () => {
                 </div>
               </section>
 
+              <section>
+                <div className="flex items-center gap-2 mb-4">
+                  <Key size={16} className="text-blue-600" />
+                  <h3 className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-gray-400">API Credentials</h3>
+                </div>
+                <div className="space-y-4">
+                  <div className="p-4 rounded-2xl border-2 border-gray-100 bg-white flex flex-col gap-2 transition-all">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-gray-700">Gemini API Key</p>
+                        <p className="text-[10px] text-gray-400 mt-0.5 font-medium">Use your personal Gemini API Key instead of the default shared quota</p>
+                      </div>
+                    </div>
+                    <div className="relative mt-2">
+                      <input 
+                        type={showApiKey ? "text" : "password"}
+                        value={customApiKey}
+                        onChange={(e) => setCustomApiKey(e.target.value)}
+                        placeholder="Enter your GEMINI_API_KEY..."
+                        className="w-full pr-10 pl-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-mono font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-gray-400"
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => setShowApiKey(!showApiKey)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                      >
+                        {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                    {customApiKey && (
+                      <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1 mt-1 animate-in slide-in-from-top-1 duration-150">
+                        <Check size={12} /> Custom API Key loaded successfully.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </section>
+
               <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 flex items-start gap-3">
                 <ZapOff size={14} className="text-gray-400 mt-0.5 shrink-0" />
                 <p className="text-[10px] text-gray-400 leading-relaxed italic">Note: Pro models offer higher reasoning capabilities and larger thinking budgets but may have tighter rate limits.</p>
@@ -916,7 +1157,7 @@ const App: React.FC = () => {
         <div className="p-5 border-b border-gray-100 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="bg-blue-600 p-1.5 rounded-lg shadow-sm"><Sparkles className="text-white w-4 h-4" /></div>
-            <span className="font-bold text-sm tracking-tight uppercase text-gray-600">Web Studio</span>
+            <span className="font-bold text-sm tracking-tight uppercase text-gray-600">APP GEN STUDIO</span>
           </div>
           <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden p-2 text-gray-400"><X size={20} /></button>
         </div>
@@ -1038,7 +1279,7 @@ const App: React.FC = () => {
                     </div>
                     <div className="space-y-2">
                       <label className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1"><MessageSquare size={12} className="text-blue-600" />App Description</label>
-                      <div className="relative">
+                      <div className="relative flex flex-col bg-gray-50/50 border-2 border-gray-100 focus-within:border-blue-500 focus-within:bg-white rounded-2xl md:rounded-3xl transition-all shadow-inner overflow-hidden min-h-[160px]">
                         <textarea 
                           value={prompt} 
                           onChange={(e) => setPrompt(e.target.value)} 
@@ -1053,15 +1294,34 @@ const App: React.FC = () => {
                             } 
                           }}
                           placeholder="Describe the application you want to build in detail..." 
-                          className="w-full h-32 md:h-40 p-4 md:p-6 bg-gray-50/50 border-2 border-gray-100 focus:border-blue-500 focus:bg-white rounded-2xl md:rounded-3xl resize-none text-gray-800 placeholder:text-gray-400 focus:outline-none transition-all text-base md:text-lg shadow-inner custom-scrollbar" 
+                          className="w-full flex-1 p-4 md:p-6 bg-transparent resize-none text-gray-800 placeholder:text-gray-400 focus:outline-none text-base md:text-lg custom-scrollbar min-h-[100px]" 
                         />
                         
-                        {/* File Preview Overlay */}
-                        {selectedFile && !isGenerating && (
-                          <div className="absolute top-4 right-4 group">
-                            {renderFilePreview(selectedFile, 'large')}
+                        {/* Selected File & Action bar at the bottom */}
+                        <div className="flex items-center justify-between px-4 pb-4 md:px-6 md:pb-6 bg-transparent z-10 shrink-0 border-t border-gray-100/50 pt-3">
+                          <div className="flex-1 min-w-0 pr-4">
+                            {selectedFile && !isGenerating ? (
+                              <div className="flex items-center gap-3">
+                                {renderFilePreview(selectedFile, 'large')}
+                                <div className="flex flex-col min-w-0">
+                                  <span className="text-[11px] font-semibold text-gray-500 truncate max-w-[180px] md:max-w-xs">{selectedFile.name}</span>
+                                  <button onClick={() => setSelectedFile(null)} className="text-[10px] text-red-500 hover:text-red-600 font-bold hover:underline transition-all text-left">Remove file</button>
+                                </div>
+                              </div>
+                            ) : null}
                           </div>
-                        )}
+                          
+                          {/* Upload Button */}
+                          {!isGenerating && (
+                            <button 
+                              onClick={triggerUpload}
+                              className={`p-2 rounded-full transition-all shadow-sm shrink-0 ${selectedFile ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-white text-gray-400 hover:text-blue-600 hover:bg-blue-50 border border-gray-100'}`}
+                              title="Add File"
+                            >
+                              <Plus size={18} />
+                            </button>
+                          )}
+                        </div>
 
                         {isGenerating && (
                           <div className="absolute inset-0 bg-white/90 flex flex-col items-center justify-center rounded-2xl md:rounded-3xl z-10 backdrop-blur-sm">
@@ -1069,17 +1329,6 @@ const App: React.FC = () => {
                             <p className="text-blue-600 font-bold text-[10px] tracking-[0.2em] uppercase animate-pulse px-4 text-center mb-6">Architecting Solution...</p>
                             <button onClick={handleStopGeneration} className="px-6 py-2.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl text-xs font-bold flex items-center gap-2 transition-all active:scale-95 shadow-sm border border-red-100"><Square size={12} fill="currentColor" />Stop Building</button>
                           </div>
-                        )}
-                        
-                        {/* Upload Button */}
-                        {!isGenerating && (
-                          <button 
-                            onClick={triggerUpload}
-                            className={`absolute bottom-4 right-4 p-2 rounded-full transition-all shadow-md ${selectedFile ? 'bg-blue-600 text-white' : 'bg-white text-gray-400 hover:text-blue-600 hover:bg-blue-50 border border-gray-100'}`}
-                            title="Add File"
-                          >
-                            <Plus size={18} />
-                          </button>
                         )}
                       </div>
                     </div>
@@ -1124,8 +1373,40 @@ const App: React.FC = () => {
 
             {viewMode === 'code' && (
               <div className="h-full w-full bg-[#0d1117] flex flex-col flex-1">
-                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 bg-[#0d1117] sticky top-0 z-10 shrink-0"><span className="text-[10px] font-mono text-gray-500 uppercase tracking-widest">Source Editor</span><div className="flex items-center gap-4"><button onClick={applyManualChanges} className={`text-[10px] font-bold flex items-center gap-1.5 transition-all duration-300 ${applySuccess ? 'text-green-400 scale-105' : 'text-blue-400 hover:text-blue-300'}`}>{applySuccess ? <Check size={12} /> : <Save size={12} />}{applySuccess ? 'Applied Successfully' : 'Apply Changes'}</button><button onClick={copyToClipboard} className="text-[10px] font-bold text-gray-400 hover:text-white flex items-center gap-1.5 transition-colors">{copied ? <Check size={12} /> : <Copy size={12} />}{copied ? 'Copied' : 'Copy'}</button></div></div>
-                <div className="flex-1 relative bg-[#0d1117]"><textarea value={editableCode} onChange={(e) => setEditableCode(e.target.value)} className="w-full h-full p-4 md:p-6 bg-[#0d1117] text-gray-300 font-mono text-xs md:text-sm leading-relaxed resize-none focus:outline-none custom-scrollbar border-none selection:bg-blue-500/30" spellCheck={false} /></div>
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 bg-[#0d1117] sticky top-0 z-10 shrink-0">
+                  <span className="text-[10px] font-mono text-gray-500 uppercase tracking-widest">Source Editor</span>
+                  <div className="flex items-center gap-4">
+                    <button onClick={applyManualChanges} className={`text-[10px] font-bold flex items-center gap-1.5 transition-all duration-300 ${applySuccess ? 'text-green-400 scale-105' : 'text-blue-400 hover:text-blue-300'}`}>
+                      {applySuccess ? <Check size={12} /> : <Save size={12} />}
+                      {applySuccess ? 'Applied Successfully' : 'Apply Changes'}
+                    </button>
+                    <button onClick={handleSelectAllCode} className="text-[10px] font-bold text-gray-400 hover:text-white flex items-center gap-1.5 transition-colors">
+                      <Square size={12} />
+                      Select All
+                    </button>
+                    <button onClick={copyToClipboard} className="text-[10px] font-bold text-gray-400 hover:text-white flex items-center gap-1.5 transition-colors">
+                      {copied ? <Check size={12} /> : <Copy size={12} />}
+                      {copied ? 'Copied' : 'Copy'}
+                    </button>
+                    <button onClick={handlePasteCode} className="text-[10px] font-bold text-gray-400 hover:text-white flex items-center gap-1.5 transition-colors">
+                      <Clipboard size={12} />
+                      Paste
+                    </button>
+                    <button onClick={handleClearCode} className="text-[10px] font-bold text-red-500/80 hover:text-red-400 flex items-center gap-1.5 transition-colors">
+                      <Trash2 size={12} />
+                      Clear
+                    </button>
+                  </div>
+                </div>
+                <div className="flex-1 relative bg-[#0d1117]">
+                  <textarea 
+                    ref={codeTextareaRef}
+                    value={editableCode} 
+                    onChange={(e) => setEditableCode(e.target.value)} 
+                    className="w-full h-full p-4 md:p-6 bg-[#0d1117] text-gray-300 font-mono text-xs md:text-sm leading-relaxed resize-none focus:outline-none custom-scrollbar border-none selection:bg-blue-500/30" 
+                    spellCheck={false} 
+                  />
+                </div>
               </div>
             )}
           </div>
