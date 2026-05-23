@@ -1,0 +1,78 @@
+{
+  "entities": {
+    "users": {
+      "title": "User Profile",
+      "description": "User profile with their personal Gemini API configuration.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Unique Firebase User ID."
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address."
+        },
+        "geminiApiKey": {
+          "type": "string",
+          "description": "User custom Gemini API Key."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "projects": {
+      "title": "Project History",
+      "description": "A single generated HTML code project associated with a user account.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique project identifier."
+        },
+        "userId": {
+          "type": "string",
+          "description": "The UID of the user who owns this project."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the project."
+        },
+        "prompt": {
+          "type": "string",
+          "description": "The description prompt used to generate this app's code."
+        },
+        "code": {
+          "type": "string",
+          "description": "The raw generated HTML/CSS/JS code."
+        },
+        "parentId": {
+          "type": "string",
+          "description": "Reference to parent project if it’s a refinement."
+        },
+        "timestamp": {
+          "type": "integer",
+          "description": "Unix timestamp of creation."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "userId", "name", "prompt", "code", "timestamp", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "users",
+      "description": "Individual user accounts with optional custom Gemini API keys."
+    },
+    "users/{userId}/projects/{projectId}": {
+      "schema": "projects",
+      "description": "User-specific project history stored in a subcollection under their profile."
+    }
+  }
+}

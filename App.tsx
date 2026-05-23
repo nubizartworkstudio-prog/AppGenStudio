@@ -58,6 +58,20 @@ import {
 import { PreviewDevice, GeneratedProject, ViewMode, Orientation } from './types';
 import { generateAppCode } from './services/geminiService';
 import PreviewFrame from './components/PreviewFrame';
+import { 
+  auth, 
+  signInWithGoogle, 
+  logoutUser, 
+  getUserProfile, 
+  createUserProfile, 
+  updateUserApiKey, 
+  getUserProjects, 
+  saveUserProject, 
+  deleteUserProject 
+} from './services/firebase';
+import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { LogOut } from 'lucide-react';
+
 
 interface EditElementData {
   tagName: string;
@@ -73,50 +87,9 @@ interface EditElementData {
 }
 
 const App: React.FC = () => {
-  // Synchronously load the history and active project on mount to initialize the states consistently
-  const initialHistory = (() => {
-    try {
-      const saved = localStorage.getItem('ai_studio_history_v2');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return parsed as GeneratedProject[];
-        }
-      }
-    } catch (e) {
-      console.error("Failed to parse history from localStorage", e);
-    }
-    return [] as GeneratedProject[];
-  })();
-
-  const initialActiveProjectId = (() => {
-    try {
-      const savedActiveId = localStorage.getItem('ai_studio_active_project_id');
-      if (initialHistory && initialHistory.length > 0) {
-        if (savedActiveId && initialHistory.some(p => p && p.id === savedActiveId)) {
-          return savedActiveId;
-        }
-        return initialHistory[0].id; // Default to latest project in history
-      }
-    } catch (e) {
-      console.error("Failed to parse active project ID from localStorage", e);
-    }
-    return null;
-  })();
-
-  const initialActiveProject = Array.isArray(initialHistory) 
-    ? initialHistory.find(p => p && p.id === initialActiveProjectId) 
-    : undefined;
-
-  const initialProjectTitle = (() => {
-    if (initialActiveProject) {
-      const rootProj = initialActiveProject.parentId 
-        ? initialHistory.find(p => p && p.id === initialActiveProject.parentId) || initialActiveProject
-        : initialActiveProject;
-      return rootProj.name || '';
-    }
-    return '';
-  })();
+  // Authentication state
+  const [currUser, setCurrUser] = useState<FirebaseUser | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
 
   const [projectTitle, setProjectTitle] = useState('');
   const [prompt, setPrompt] = useState('');
@@ -128,7 +101,8 @@ const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<ViewMode>('build');
   const [device, setDevice] = useState<PreviewDevice>(PreviewDevice.DESKTOP);
   const [orientation, setOrientation] = useState<Orientation>('portrait');
-  const [history, setHistory] = useState<GeneratedProject[]>(initialHistory);
+  const [history, setHistory] = useState<GeneratedProject[]>([]);
+
   const [copied, setCopied] = useState(false);
   const [applySuccess, setApplySuccess] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -210,6 +184,80 @@ const App: React.FC = () => {
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
   const previewContainerRef = useRef<HTMLDivElement>(null);
 
+  // Listen to authentication state changes
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setIsAuthLoading(true);
+      if (user) {
+        setCurrUser(user);
+        try {
+          // 1. Fetch or create user profile
+          let profile = await getUserProfile(user.uid);
+          if (!profile) {
+            profile = await createUserProfile(user.uid, user.email || '');
+          }
+
+          // 2. Load API key if present
+          if (profile && profile.geminiApiKey) {
+            setCustomApiKey(profile.geminiApiKey);
+            localStorage.setItem('ai_studio_api_key', profile.geminiApiKey);
+          } else {
+            const localKey = localStorage.getItem('ai_studio_api_key') || '';
+            if (localKey && profile) {
+              await updateUserApiKey(user.uid, localKey);
+              setCustomApiKey(localKey);
+            } else {
+              setCustomApiKey('');
+            }
+          }
+
+          // 3. Load user's private projects
+          const userProjects = await getUserProjects(user.uid);
+          setHistory(userProjects);
+
+          // 4. Set active project
+          if (userProjects.length > 0) {
+            const savedActiveId = localStorage.getItem('ai_studio_active_project_id');
+            const existsActive = savedActiveId && userProjects.some(p => p.id === savedActiveId);
+            const activeId = existsActive ? savedActiveId : userProjects[0].id;
+            const activeProj = userProjects.find(p => p.id === activeId)!;
+            
+            setActiveProjectId(activeId);
+            setProjectTitle(activeProj.name);
+            setPrompt(activeProj.prompt);
+            setCode(activeProj.code);
+            setEditableCode(activeProj.code);
+            setViewMode('preview');
+          } else {
+            setActiveProjectId(null);
+            setProjectTitle('');
+            setPrompt('');
+            setCode('');
+            setEditableCode('');
+            setViewMode('build');
+          }
+        } catch (err) {
+          console.error("Error signing in or loading data: ", err);
+        }
+      } else {
+        setCurrUser(null);
+        setHistory([]);
+        setActiveProjectId(null);
+        setProjectTitle('');
+        setPrompt('');
+        setCode('');
+        setEditableCode('');
+        setCustomApiKey('');
+        localStorage.removeItem('ai_studio_api_key');
+        localStorage.removeItem('ai_studio_active_project_id');
+        setViewMode('build');
+      }
+      setIsAuthLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   useEffect(() => {
     return () => {
       if (abortControllerRef.current) {
@@ -262,44 +310,49 @@ const App: React.FC = () => {
     }
   }, [isAutosaveEnabled]);
 
+  // Sync API Key to Firestore User Profile when modified
   useEffect(() => {
     try {
       if (customApiKey) {
         localStorage.setItem('ai_studio_api_key', customApiKey);
+        if (currUser) {
+          updateUserApiKey(currUser.uid, customApiKey).catch(e => console.warn("Failed to sync API key to Firestore", e));
+        }
       } else {
         localStorage.removeItem('ai_studio_api_key');
+        if (currUser) {
+          updateUserApiKey(currUser.uid, '').catch(e => console.warn("Failed to clear API key from Firestore", e));
+        }
       }
     } catch (e) {
       console.warn("Failed to write API key to localStorage", e);
     }
-  }, [customApiKey]);
+  }, [customApiKey, currUser]);
 
   // Autosave logic
   useEffect(() => {
     if (!isAutosaveEnabled || !activeProjectId || isGenerating) return;
 
     const timeout = setTimeout(() => {
-      setHistory(prev => {
-        const project = prev.find(p => p.id === activeProjectId);
-        if (!project) return prev;
-        
-        // Only update if something actually changed to prevent excessive writes
-        if (project.code === code && project.name === projectTitle && project.prompt === prompt) {
-          return prev;
-        }
+      const project = history.find(p => p.id === activeProjectId);
+      if (!project) return;
+      
+      // Only update if something actually changed to prevent excessive writes
+      if (project.code === code && project.name === projectTitle && project.prompt === prompt) {
+        return;
+      }
 
-        const updatedHistory = prev.map(p => 
-          p.id === activeProjectId 
-            ? { ...p, code, name: projectTitle || p.name, prompt, timestamp: Date.now() } 
-            : p
-        );
-        setLastAutosave(Date.now());
-        return updatedHistory;
-      });
+      const updatedProject = { ...project, code, name: projectTitle || project.name, prompt, timestamp: Date.now() };
+      setHistory(prev => prev.map(p => p.id === activeProjectId ? updatedProject : p));
+      setLastAutosave(Date.now());
+      
+      if (currUser) {
+        saveUserProject(currUser.uid, updatedProject).catch(err => console.error("Autosave Firestore Error", err));
+      }
     }, 10000); // Autosave after 10 seconds of no changes
 
     return () => clearTimeout(timeout);
-  }, [code, projectTitle, prompt, activeProjectId, isAutosaveEnabled, isGenerating]);
+  }, [code, projectTitle, prompt, activeProjectId, isAutosaveEnabled, isGenerating, history, currUser]);
 
   const handleStopGeneration = () => {
     if (abortControllerRef.current) {
@@ -367,15 +420,10 @@ const App: React.FC = () => {
     setPrompt("");
     setCode(blankBoilerplate);
     setEditableCode(blankBoilerplate);
-    setHistory(prev => {
-      const next = [newProject, ...prev];
-      try {
-        localStorage.setItem('ai_studio_history_v2', JSON.stringify(next));
-      } catch (e) {
-        console.warn("Failed to save history in handleCreateBlankProject", e);
-      }
-      return next;
-    });
+    setHistory(prev => [newProject, ...prev]);
+    if (currUser) {
+      saveUserProject(currUser.uid, newProject).catch(err => console.error("Firestore save project error", err));
+    }
     setActiveProjectId(newProjectId);
     setViewMode('preview');
     setIsMobileMenuOpen(false);
@@ -406,15 +454,11 @@ const App: React.FC = () => {
 
   const handleConfirmOverwrite = () => {
     if (!overwriteCandidate) return;
-    setHistory(prev => {
-      const next = prev.map(p => p.id === overwriteCandidate.id ? { ...p, code, prompt, timestamp: Date.now() } : p);
-      try {
-        localStorage.setItem('ai_studio_history_v2', JSON.stringify(next));
-      } catch (e) {
-        console.warn("Failed to save history in handleConfirmOverwrite", e);
-      }
-      return next;
-    });
+    const updatedProject = { ...overwriteCandidate, code, prompt, timestamp: Date.now() };
+    setHistory(prev => prev.map(p => p.id === overwriteCandidate.id ? updatedProject : p));
+    if (currUser) {
+      saveUserProject(currUser.uid, updatedProject).catch(err => console.error(err));
+    }
     setActiveProjectId(overwriteCandidate.id);
     saveToSimulatedFS(projectTitle, code, prompt);
     triggerFileDownload(projectTitle, code);
@@ -429,15 +473,15 @@ const App: React.FC = () => {
     if (existingProject && existingProject.id !== activeProjectId) {
       setOverwriteCandidate(existingProject);
     } else if (activeProjectId) {
-      setHistory(prev => {
-        const next = prev.map(p => p.id === activeProjectId ? { ...p, name: projectTitle.trim(), code, prompt, timestamp: Date.now() } : p);
-        try {
-          localStorage.setItem('ai_studio_history_v2', JSON.stringify(next));
-        } catch (e) {
-          console.warn("Failed to save history in handleSaveProject update", e);
-        }
-        return next;
-      });
+      const activeProj = history.find(p => p.id === activeProjectId);
+      const updatedProject = activeProj 
+        ? { ...activeProj, name: projectTitle.trim(), code, prompt, timestamp: Date.now() }
+        : { id: activeProjectId, name: projectTitle.trim(), code, prompt, timestamp: Date.now() };
+      
+      setHistory(prev => prev.map(p => p.id === activeProjectId ? updatedProject : p));
+      if (currUser) {
+        saveUserProject(currUser.uid, updatedProject).catch(err => console.error(err));
+      }
       saveToSimulatedFS(projectTitle, code, prompt);
       triggerFileDownload(projectTitle, code);
       setSaveSuccess(true);
@@ -451,16 +495,11 @@ const App: React.FC = () => {
         code: code,
         timestamp: Date.now()
       };
-      setHistory(prev => {
-        const next = [newProject, ...prev];
-        try {
-          localStorage.setItem('ai_studio_history_v2', JSON.stringify(next));
-        } catch (e) {
-          console.warn("Failed to save history in handleSaveProject new", e);
-        }
-        return next;
-      });
+      setHistory(prev => [newProject, ...prev]);
       setActiveProjectId(newProjectId);
+      if (currUser) {
+        saveUserProject(currUser.uid, newProject).catch(err => console.error(err));
+      }
       saveToSimulatedFS(projectTitle, code, prompt);
       triggerFileDownload(projectTitle, code);
       setSaveSuccess(true);
@@ -512,16 +551,12 @@ const App: React.FC = () => {
       
       setCode(result.code);
       setEditableCode(result.code);
-      setHistory(prev => {
-        const next = [newProject, ...prev];
-        try {
-          localStorage.setItem('ai_studio_history_v2', JSON.stringify(next));
-        } catch (e) {
-          console.warn("Failed to save history in handleGenerate", e);
-        }
-        return next;
-      });
+      setHistory(prev => [newProject, ...prev]);
       setActiveProjectId(newProjectId);
+      
+      if (currUser) {
+        saveUserProject(currUser.uid, newProject).catch(err => console.error(err));
+      }
       
       if (isRefinement) {
         setRefinePrompt('');
@@ -559,15 +594,13 @@ const App: React.FC = () => {
       setEditingProjectId(null);
       return;
     }
-    setHistory(prev => {
-      const next = prev.map(p => p.id === id ? { ...p, name: newName } : p);
-      try {
-        localStorage.setItem('ai_studio_history_v2', JSON.stringify(next));
-      } catch (e) {
-        console.warn("Failed to save history in handleRename", e);
+    setHistory(prev => prev.map(p => p.id === id ? { ...p, name: newName } : p));
+    if (currUser) {
+      const proj = history.find(p => p.id === id);
+      if (proj) {
+        saveUserProject(currUser.uid, { ...proj, name: newName }).catch(err => console.error(err));
       }
-      return next;
-    });
+    }
     if (activeProjectId === id) setProjectTitle(newName);
     setEditingProjectId(null);
   };
@@ -581,15 +614,14 @@ const App: React.FC = () => {
   const confirmDelete = () => {
     if (!projectToDeleteId) return;
     const id = projectToDeleteId;
-    setHistory(prev => {
-      const next = prev.filter(p => p.id !== id && p.parentId !== id);
-      try {
-        localStorage.setItem('ai_studio_history_v2', JSON.stringify(next));
-      } catch (e) {
-        console.warn("Failed to save history in confirmDelete", e);
-      }
-      return next;
-    });
+    setHistory(prev => prev.filter(p => p.id !== id && p.parentId !== id));
+    if (currUser) {
+      deleteUserProject(currUser.uid, id).catch(err => console.error(err));
+      const refinedProjects = history.filter(p => p.parentId === id);
+      refinedProjects.forEach(rp => {
+        deleteUserProject(currUser.uid, rp.id).catch(err => console.error(err));
+      });
+    }
     if (activeProjectId === id) {
       setActiveProjectId(null);
       setCode('');
@@ -645,15 +677,14 @@ const App: React.FC = () => {
     setCode(editableCode);
     setPreviewKey(k => k + 1);
     if (activeProjectId) {
-      setHistory(prev => {
-        const next = prev.map(p => p.id === activeProjectId ? { ...p, code: editableCode } : p);
-        try {
-          localStorage.setItem('ai_studio_history_v2', JSON.stringify(next));
-        } catch (e) {
-          console.warn("Failed to save history in applyManualChanges", e);
+      const activeProj = history.find(p => p.id === activeProjectId);
+      if (activeProj) {
+        const updatedProj = { ...activeProj, code: editableCode };
+        setHistory(prev => prev.map(p => p.id === activeProjectId ? updatedProj : p));
+        if (currUser) {
+          saveUserProject(currUser.uid, updatedProj).catch(err => console.error(err));
         }
-        return next;
-      });
+      }
     }
     setApplySuccess(true);
     setTimeout(() => setApplySuccess(false), 2000);
@@ -780,20 +811,97 @@ const App: React.FC = () => {
       setCode(updatedHTML);
       setEditableCode(updatedHTML);
       if (activeProjectId) {
-        setHistory(prev => {
-          const next = prev.map(p => p.id === activeProjectId ? { ...p, code: updatedHTML } : p);
-          try {
-            localStorage.setItem('ai_studio_history_v2', JSON.stringify(next));
-          } catch (e) {
-            console.warn("Failed to save history in handleSaveElementChanges", e);
+        const activeProj = history.find(p => p.id === activeProjectId);
+        if (activeProj) {
+          const updatedProj = { ...activeProj, code: updatedHTML };
+          setHistory(prev => prev.map(p => p.id === activeProjectId ? updatedProj : p));
+          if (currUser) {
+            saveUserProject(currUser.uid, updatedProj).catch(err => console.error(err));
           }
-          return next;
-        });
+        }
       }
     }
 
     setActiveEditElement(null);
   };
+
+  if (isAuthLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-50 via-gray-50 to-gray-100 font-sans">
+        <div className="flex flex-col items-center gap-4 text-center">
+          <div className="p-4 bg-white shadow-xl rounded-2xl border border-blue-50/50 animate-pulse">
+            <Sparkles className="w-12 h-12 text-blue-600 animate-spin" style={{ animationDuration: '3s' }} />
+          </div>
+          <div>
+            <h2 className="text-xl font-black text-gray-900 tracking-tight animate-pulse">Initializing Session</h2>
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Establishing secure workspace...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currUser) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-50 via-gray-50 to-gray-150 p-4 font-sans max-md:flex-col">
+        <div className="w-full max-w-md bg-white rounded-[2.5rem] border border-gray-100 shadow-2xl shadow-blue-100/40 overflow-hidden flex flex-col p-8 md:p-10 relative">
+          
+          <div className="flex flex-col items-center text-center">
+            {/* Ambient visual badge */}
+            <div className="inline-flex p-4 rounded-3xl bg-blue-600 text-white mb-6 shadow-md shadow-blue-500/10">
+              <Sparkles size={36} className="animate-pulse" />
+            </div>
+            
+            <h1 className="text-3xl font-black text-gray-900 tracking-tight leading-tight">App Gen Studio</h1>
+            <p className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-blue-600 mt-1">Custom Workspace Console</p>
+            
+            <p className="text-sm text-gray-500 mt-6 leading-relaxed font-semibold">
+              Log in with your Google account to manage, persist, and retrieve custom app builds and developer settings.
+            </p>
+          </div>
+
+          <div className="mt-8 space-y-4">
+            {/* Google Sign-In Button */}
+            <button 
+              onClick={async () => {
+                setError(null);
+                try {
+                  await signInWithGoogle();
+                } catch (err: any) {
+                  setError(err.message || "Sign in failed. Please try again.");
+                }
+              }}
+              className="w-full py-4 px-6 bg-gray-900 hover:bg-black text-white rounded-2xl text-sm font-bold transition-all duration-300 flex items-center justify-center gap-3 shadow-xl active:scale-95 group cursor-pointer"
+            >
+              <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+                <path fill="#EA4335" d="M12 5.04c1.62 0 3.08.56 4.22 1.65l3.15-3.15C17.45 1.74 14.93 1 12 1 7.37 1 3.44 3.66 1.54 7.54l3.71 2.87C6.12 7.33 8.79 5.04 12 5.04z" />
+                <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.34H12v4.43h6.46c-.28 1.45-1.1 2.68-2.33 3.51l3.61 2.8c2.11-1.95 3.32-4.83 3.32-8.4z" />
+                <path fill="#FBBC05" d="M5.25 10.41c-.24-.72-.38-1.5-.38-2.31s.14-1.59.38-2.31L1.54 2.91C.56 4.89 0 7.11 0 9.4s.56 4.51 1.54 6.49l3.71-2.87z" />
+                <path fill="#34A853" d="M12 18c3.24 0 5.97-1.07 7.96-2.91l-3.61-2.8c-1.01.68-2.31 1.09-3.95 1.09-3.21 0-5.88-2.29-6.75-5.37L1.54 15.89C3.44 19.77 7.37 22 12 22z" />
+              </svg>
+              Sign In with Google Account
+            </button>
+
+            {/* Error detail */}
+            {error && (
+              <div className="p-4 bg-red-50 text-red-600 rounded-2xl text-xs font-semibold border border-red-100 flex items-start gap-2.5 animate-in slide-in-from-top-2 duration-150">
+                <X size={14} className="mt-0.5 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-10 pt-6 border-t border-gray-100 flex items-center justify-center gap-2 text-gray-400">
+            <svg className="w-4 h-4 text-emerald-500" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M2.166 11.388c-.902-.121-1.62-.779-1.854-1.652a6.974 6.974 0 010-3.472c.234-.873.952-1.531 1.854-1.652A43.762 43.762 0 0110 4c2.668 0 5.253.238 7.834.702.902.121 1.62.779 1.854 1.652a6.974 6.974 0 010 3.472c-.234.873-.952 1.531-1.854 1.652A43.762 43.762 0 0110 16c-2.668 0-5.253-.238-7.834-.702zM10 12a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+            </svg>
+            <span className="text-[10px] font-extrabold uppercase tracking-widest">Secured by Google Identity</span>
+          </div>
+
+        </div>
+      </div>
+    );
+  }
 
   const filteredHistory = history.filter(project => project.name.toLowerCase().includes(searchTerm.toLowerCase()));
   const rootProjects = filteredHistory.filter(p => !p.parentId);
@@ -1211,14 +1319,45 @@ const App: React.FC = () => {
             )}
           </div>
         </div>
-        <div className="border-t border-gray-100 bg-gray-50/50 mt-auto px-4 py-3">
-          <button onClick={() => { setIsSettingsOpen(true); setIsMobileMenuOpen(false); }} className="flex items-center justify-between w-full text-gray-500 hover:text-gray-900 text-xs font-medium transition-all group pt-1">
-            <div className="flex items-center gap-3"><Settings size={14} /><span>Studio Settings</span></div>
+        <div className="border-t border-gray-100 bg-gray-50/50 mt-auto px-4 py-3 space-y-3 shrink-0">
+          <button onClick={() => { setIsSettingsOpen(true); setIsMobileMenuOpen(false); }} className="flex items-center justify-between w-full text-gray-400 hover:text-gray-900 text-xs font-semibold transition-all group">
+            <div className="flex items-center gap-2.5"><Settings size={14} /><span>Studio Settings</span></div>
             {(() => {
               const info = getModelBadgeInfo(selectedModel);
               return <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider ${info.className}`}><span>{info.version}</span><span className="opacity-50">•</span><span>{info.label}</span></div>;
             })()}
           </button>
+
+          {currUser && (
+            <div className="flex items-center justify-between pt-3 border-t border-gray-100">
+              <div className="flex items-center gap-2.5 min-w-0">
+                {currUser.photoURL ? (
+                  <img src={currUser.photoURL} alt={currUser.displayName || 'User'} className="w-8 h-8 rounded-full border border-gray-100" referrerPolicy="no-referrer" />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xs shrink-0 font-sans">
+                    {currUser.displayName?.charAt(0) || currUser.email?.charAt(0) || 'U'}
+                  </div>
+                )}
+                <div className="flex flex-col min-w-0">
+                  <span className="text-xs font-bold text-gray-750 truncate tracking-tight">{currUser.displayName || 'Developer'}</span>
+                  <span className="text-[9px] text-gray-400 truncate tracking-tight">{currUser.email}</span>
+                </div>
+              </div>
+              <button 
+                onClick={async () => {
+                  try {
+                    await logoutUser();
+                  } catch (err) {
+                    console.error("Logout failed:", err);
+                  }
+                }}
+                className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all cursor-pointer"
+                title="Log Out"
+              >
+                <LogOut size={14} />
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 
