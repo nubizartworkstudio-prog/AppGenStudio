@@ -520,6 +520,7 @@ const App: React.FC = () => {
       
       setCode(result.code);
       setEditableCode(result.code);
+      setPrompt(activePrompt);
       setHistory(prev => {
         const next = [newProject, ...prev];
         try {
