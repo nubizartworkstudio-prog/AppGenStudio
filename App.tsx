@@ -1275,7 +1275,8 @@ const App: React.FC = () => {
             {filteredHistory.length === 0 ? <div className="px-3 py-4 text-xs text-gray-400 italic">{searchTerm ? 'No matches found' : 'No previous builds'}</div> : (
               <div className="space-y-4 pb-4">
                 {rootProjects.map((project) => {
-                  const children = history.filter(p => p.parentId === project.id && (p.name.toLowerCase().includes(searchTerm.toLowerCase()) || p.prompt.toLowerCase().includes(searchTerm.toLowerCase()))).sort((a, b) => a.timestamp - b.timestamp);
+                  const actualChildren = history.filter(p => p.parentId === project.id && (p.name.toLowerCase().includes(searchTerm.toLowerCase()) || p.prompt.toLowerCase().includes(searchTerm.toLowerCase()))).sort((a, b) => a.timestamp - b.timestamp);
+                  const children = [project, ...actualChildren];
                   const isEditing = editingProjectId === project.id;
                   return (
                     <div key={project.id} className="space-y-1">
@@ -1292,17 +1293,26 @@ const App: React.FC = () => {
                         <span className="text-[9px] text-gray-400 mt-0.5">{new Date(project.timestamp).toLocaleDateString()} {new Date(project.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
                       {children.length > 0 && <div className="ml-4 pl-2 border-l border-gray-100 space-y-1 mt-1">
-                        {children.map(child => (
-                          <div key={child.id} onClick={() => loadFromHistory(child)} className={`group relative px-2 py-1.5 rounded-md cursor-pointer flex items-center gap-2 transition-all border border-transparent ${activeProjectId === child.id ? 'bg-blue-50 text-blue-700 border-blue-100' : 'text-gray-500 hover:bg-gray-100'}`}>
-                            <CornerDownRight size={10} className="text-gray-300 shrink-0" />
-                            <div className="flex items-center justify-between w-full">
-                              <span className="text-[11px] font-medium truncate pr-10" title={child.prompt || child.name.replace('Refined: ', '')}>
-                                {child.prompt || child.name.replace('Refined: ', '')}
-                              </span>
-                              <div className="absolute top-1/2 -translate-y-1/2 right-1 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all"><button onClick={(e) => openDeleteConfirmation(child.id, e)} className="p-1 text-gray-300 hover:text-red-500 transition-all"><Trash2 size={10} /></button></div>
+                        {children.map(child => {
+                          const isOriginal = child.id === project.id;
+                          return (
+                            <div key={child.id} onClick={() => loadFromHistory(child)} className={`group relative px-2 py-1.5 rounded-md cursor-pointer flex items-center gap-2 transition-all border border-transparent ${activeProjectId === child.id ? 'bg-blue-50 text-blue-700 border-blue-100' : 'text-gray-500 hover:bg-gray-100'}`}>
+                              <CornerDownRight size={10} className="text-gray-300 shrink-0" />
+                              <div className="flex items-center justify-between w-full">
+                                <span className="text-[11px] font-medium truncate pr-10" title={isOriginal ? `Binaan Asal: ${child.prompt || child.name}` : child.prompt || child.name.replace('Refined: ', '')}>
+                                  {isOriginal ? `Binaan Asal: ${child.prompt || child.name}` : (child.prompt || child.name.replace('Refined: ', ''))}
+                                </span>
+                                {!isOriginal && (
+                                  <div className="absolute top-1/2 -translate-y-1/2 right-1 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
+                                    <button onClick={(e) => openDeleteConfirmation(child.id, e)} className="p-1 text-gray-300 hover:text-red-500 transition-all">
+                                      <Trash2 size={10} />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>}
                     </div>
                   );
