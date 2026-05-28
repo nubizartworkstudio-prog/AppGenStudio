@@ -298,7 +298,7 @@ const App: React.FC = () => {
 
         const updatedHistory = prev.map(p => 
           p.id === activeProjectId 
-            ? { ...p, code, name: projectTitle || p.name, prompt, timestamp: Date.now() } 
+            ? { ...p, code, name: p.parentId ? p.name : (projectTitle || p.name), prompt, timestamp: Date.now() } 
             : p
         );
         setLastAutosave(Date.now());
@@ -438,7 +438,7 @@ const App: React.FC = () => {
       setOverwriteCandidate(existingProject);
     } else if (activeProjectId) {
       setHistory(prev => {
-        const next = prev.map(p => p.id === activeProjectId ? { ...p, name: projectTitle.trim(), code, prompt, timestamp: Date.now() } : p);
+        const next = prev.map(p => p.id === activeProjectId ? { ...p, name: p.parentId ? p.name : projectTitle.trim(), code, prompt, timestamp: Date.now() } : p);
         try {
           localStorage.setItem('ai_studio_history_v2', JSON.stringify(next));
         } catch (e) {
@@ -1274,7 +1274,7 @@ const App: React.FC = () => {
             {filteredHistory.length === 0 ? <div className="px-3 py-4 text-xs text-gray-400 italic">{searchTerm ? 'No matches found' : 'No previous builds'}</div> : (
               <div className="space-y-4 pb-4">
                 {rootProjects.map((project) => {
-                  const children = history.filter(p => p.parentId === project.id && p.name.toLowerCase().includes(searchTerm.toLowerCase())).sort((a, b) => a.timestamp - b.timestamp);
+                  const children = history.filter(p => p.parentId === project.id && (p.name.toLowerCase().includes(searchTerm.toLowerCase()) || p.prompt.toLowerCase().includes(searchTerm.toLowerCase()))).sort((a, b) => a.timestamp - b.timestamp);
                   const isEditing = editingProjectId === project.id;
                   return (
                     <div key={project.id} className="space-y-1">
@@ -1295,7 +1295,9 @@ const App: React.FC = () => {
                           <div key={child.id} onClick={() => loadFromHistory(child)} className={`group relative px-2 py-1.5 rounded-md cursor-pointer flex items-center gap-2 transition-all border border-transparent ${activeProjectId === child.id ? 'bg-blue-50 text-blue-700 border-blue-100' : 'text-gray-500 hover:bg-gray-100'}`}>
                             <CornerDownRight size={10} className="text-gray-300 shrink-0" />
                             <div className="flex items-center justify-between w-full">
-                              <span className="text-[11px] font-medium truncate pr-10">{child.name.replace('Refined: ', '')}</span>
+                              <span className="text-[11px] font-medium truncate pr-10" title={child.prompt || child.name.replace('Refined: ', '')}>
+                                {child.prompt || child.name.replace('Refined: ', '')}
+                              </span>
                               <div className="absolute top-1/2 -translate-y-1/2 right-1 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all"><button onClick={(e) => openDeleteConfirmation(child.id, e)} className="p-1 text-gray-300 hover:text-red-500 transition-all"><Trash2 size={10} /></button></div>
                             </div>
                           </div>
