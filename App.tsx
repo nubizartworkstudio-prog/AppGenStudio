@@ -1299,8 +1299,8 @@ const App: React.FC = () => {
                             <div key={child.id} onClick={() => loadFromHistory(child)} className={`group relative px-2 py-1.5 rounded-md cursor-pointer flex items-center gap-2 transition-all border border-transparent ${activeProjectId === child.id ? 'bg-blue-50 text-blue-700 border-blue-100' : 'text-gray-500 hover:bg-gray-100'}`}>
                               <CornerDownRight size={10} className="text-gray-300 shrink-0" />
                               <div className="flex items-center justify-between w-full">
-                                <span className="text-[11px] font-medium truncate pr-10" title={isOriginal ? `Binaan Asal: ${child.prompt || child.name}` : child.prompt || child.name.replace('Refined: ', '')}>
-                                  {isOriginal ? `Binaan Asal: ${child.prompt || child.name}` : (child.prompt || child.name.replace('Refined: ', ''))}
+                                <span className="text-[11px] font-medium truncate pr-10" title={child.prompt || child.name.replace('Refined: ', '')}>
+                                  {isOriginal ? (child.prompt || child.name) : (child.prompt || child.name.replace('Refined: ', ''))}
                                 </span>
                                 {!isOriginal && (
                                   <div className="absolute top-1/2 -translate-y-1/2 right-1 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
