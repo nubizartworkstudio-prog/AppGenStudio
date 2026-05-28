@@ -1528,7 +1528,23 @@ const App: React.FC = () => {
                 <div className="p-4 border-b border-white/20 flex items-center justify-between bg-white/40"><div className="flex items-center gap-2"><MessageSquare size={16} className="text-blue-600" /><span className="text-xs font-bold uppercase tracking-wider text-gray-600">Refine Build</span></div><button onClick={() => setShowRefineSidebar(false)} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-white/50 rounded-full transition-all"><X size={20} /></button></div>
                 <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
                   <div className="bg-blue-600/10 p-4 rounded-2xl border border-blue-200/50"><p className="text-[11px] text-blue-800 leading-relaxed font-semibold">AI is in <strong>Surgical Mode</strong>. Only the requested changes will be applied. Unrelated parts stay untouched.</p></div>
-                  {activeProject && <div className="space-y-3"><div className="bg-white/50 backdrop-blur-sm p-3 rounded-xl border border-white/50 shadow-sm"><span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Current Build</span><p className="text-[10px] text-gray-700 font-bold leading-relaxed">{activeProject.name}</p></div></div>}
+                  {activeProject && (
+                    <div className="space-y-3">
+                      <div className="bg-white/50 backdrop-blur-sm p-3.5 rounded-xl border border-white/50 shadow-sm flex flex-col gap-2">
+                        <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block">
+                          Current Build
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold ${activeProject.parentId ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>
+                            {activeProject.parentId ? "Perubahan Refine" : "Binaan Asal"}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-gray-700 font-medium leading-relaxed bg-gray-50/30 p-2.5 rounded-lg border border-gray-100/50 whitespace-pre-wrap max-h-48 overflow-y-auto custom-scrollbar">
+                          {activeProject.prompt || activeProject.name}
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="p-4 border-t border-white/20 bg-white/40 pb-8 md:pb-6">
                   <div className="flex flex-col gap-3">
